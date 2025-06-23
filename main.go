@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"      // For logging server messages to the console
 	"net/http" // The core package for building web servers
+	"os"
 )
 
 type UserSignUpRequest struct {
@@ -77,18 +78,70 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // assetsHandler manages creative asset uploads and retrieval
+// creativeAssetsHandler manages creative asset uploads and retrieval
 func creativeAssetsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// In a real app, this would list uploaded assets for the user
+		// Placeholder for getting assets (will come later with database/storage)
 		fmt.Fprintf(w, "You requested to GET your creative assets (simulated).")
+		log.Printf("Received GET request for /assets")
 	case http.MethodPost:
-		// This will be crucial for handling image/video uploads
-		fmt.Fprintf(w, "You requested to POST a new creative asset (simulated upload).")
+		// --- FILE UPLOAD LOGIC ---
+		// 1. Parse the multipart form data. Max memory 10MB (10 << 20 bytes).
+		// Files larger than this will be written to disk in a temp directory.
+		err := r.ParseMultipartForm(10 << 20) // 10 MB limit
+		if err != nil {
+			http.Error(w, "Error parsing multipart form: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("Error parsing multipart form for /assets POST: %v", err)
+			return
+		}
+
+		// 2. Retrieve the file from the form data.
+		// "image" is the name of the form field that will contain the file.
+		// When building the frontend, your <input type="file" name="image">
+		// will need to match this "image" key.
+		file, handler, err := r.FormFile("image")
+		if err != nil {
+			http.Error(w, "Error retrieving file from form: "+err.Error(), http.StatusBadRequest)
+			log.Printf("Error retrieving 'image' file from form for /assets POST: %v", err)
+			return
+		}
+		// Ensure the uploaded file is closed when the function exits
+		defer file.Close()
+
+		// 3. Create a destination file on the server to save the uploaded content.
+		// For now, we'll save it directly in the 'blairproject' directory.
+		// In a real app, you'd save it to a dedicated 'uploads' folder or cloud storage.
+		dst, err := os.Create(handler.Filename) // Use the original filename
+		if err != nil {
+			http.Error(w, "Error creating file on server: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("Error creating destination file '%s': %v", handler.Filename, err)
+			return
+		}
+		// Ensure the destination file is closed when the function exits
+		defer dst.Close()
+
+		// 4. Copy the uploaded file's content to the new destination file.
+		if _, err := io.Copy(dst, file); err != nil {
+			http.Error(w, "Error saving file: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("Error copying file content to '%s': %v", handler.Filename, err)
+			return
+		}
+
+		// 5. Send a success response
+		response := GenericResponse{
+			Message: fmt.Sprintf("File '%s' uploaded successfully with size %d bytes (simulated).", handler.Filename, handler.Size),
+			Status:  "success",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+
+		log.Printf("File '%s' uploaded successfully to local storage.", handler.Filename)
+
 	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
-	log.Printf("Received %s request for /assets", r.Method)
 }
 
 // modifyImageHandler handles requests to apply GenAI modifications to an image
